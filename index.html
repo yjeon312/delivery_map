@@ -2,176 +2,135 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>카카오 지도 경유지 최적화 경로</title>
+    <title>Kakao Multi-Route Finder</title>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; }
-        #map { width: 100%; height: 500px; border-radius: 10px; border: 1px solid #ccc; }
-        .input-group { margin-bottom: 5px; }
-        .input-panel { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-        input { padding: 8px; width: 280px; margin-bottom: 5px; }
-        button { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: none; font-weight: bold; }
-        .btn-add { background: #e9ecef; }
-        .btn-search { background: #fee500; width: 100%; margin-top: 10px; font-size: 16px; }
-        #result { margin-top: 15px; padding: 10px; border-left: 5px solid #fee500; background: #fffdf0; display: none; }
+        :root { --k-yellow: #fee500; --k-brown: #3c1e1e; }
+        body { font-family: 'Malgun Gothic', sans-serif; background: #f9f9f9; padding: 20px; }
+        .app-container { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 15px; }
+        .input-card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .route-row { display: flex; align-items: center; margin-bottom: 8px; gap: 10px; }
+        .label { width: 40px; font-weight: bold; color: #555; }
+        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; outline: none; }
+        input:focus { border-color: var(--k-yellow); }
+        button { border: none; cursor: pointer; border-radius: 8px; font-weight: bold; transition: 0.2s; }
+        .btn-add { background: #eee; padding: 8px 15px; }
+        .btn-search { background: var(--k-yellow); color: var(--k-brown); padding: 15px; width: 100%; font-size: 16px; margin-top: 10px; }
+        .btn-search:hover { background: #fada00; }
+        #map { width: 100%; height: 500px; border-radius: 15px; border: 1px solid #ddd; }
+        .info-box { padding: 15px; background: #eef2ff; border-radius: 10px; border-left: 5px solid #4f46e5; display: none; }
     </style>
 </head>
 <body>
 
-    <div class="input-panel">
-        <div class="input-group">
-            <strong>출발:</strong> <input type="text" id="startAddr" value="서울역">
+<div class="app-container">
+    <div class="input-card">
+        <div class="route-row">
+            <span class="label">출발</span>
+            <input type="text" id="startAddr" value="서울역" placeholder="출발지 주소">
         </div>
-        <div id="waypoint-container">
-            <div class="input-group">
-                <strong>경유:</strong> <input type="text" class="waypoint-addr" placeholder="경유지 주소 입력">
+        <div id="waypoint-list">
+            <div class="route-row">
+                <span class="label">경유</span>
+                <input type="text" class="wp-addr" placeholder="경유지 주소">
             </div>
         </div>
-        <button class="btn-add" onclick="addWaypointField()">+ 경유지 추가</button>
-        <div class="input-group" style="margin-top:10px;">
-            <strong>도착:</strong> <input type="text" id="endAddr" value="부산역">
+        <button class="btn-add" onclick="addWaypoint()">+ 경유지 추가</button>
+        <div class="route-row" style="margin-top:10px;">
+            <span class="label">도착</span>
+            <input type="text" id="endAddr" value="부산역" placeholder="도착지 주소">
         </div>
-        <button class="btn-search" onclick="getOptimizedRoute()">최적 경로 탐색 (순서 최적화)</button>
+        <button class="btn-search" onclick="findRoute()">경로 탐색 및 길찾기 실행</button>
     </div>
 
-    <div id="result"></div>
+    <div id="info-box" class="info-box"></div>
     <div id="map"></div>
+</div>
 
-    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=cc6395efcb6491cc27cc6346dc2f5283&libraries=services"></script>
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=cc6395efcb6491cc27cc6346dc2f5283&libraries=services,navidapi"></script>
 
-    <script>
-        const mapContainer = document.getElementById('map');
-        const mapOption = { center: new kakao.maps.LatLng(37.5668, 126.9786), level: 3 };
-        const map = new kakao.maps.Map(mapContainer, mapOption);
-        const geocoder = new kakao.maps.services.Geocoder();
-        let polyline = null;
-        let markers = [];
+<script>
+    const mapContainer = document.getElementById('map');
+    const mapOption = { center: new kakao.maps.LatLng(37.5668, 126.9786), level: 4 };
+    const map = new kakao.maps.Map(mapContainer, mapOption);
+    const geocoder = new kakao.maps.services.Geocoder();
+    let markers = [];
 
-        // 경유지 입력 필드 추가 함수
-        function addWaypointField() {
-            const container = document.getElementById('waypoint-container');
-            const div = document.createElement('div');
-            div.className = 'input-group';
-            div.innerHTML = `<strong>경유:</strong> <input type="text" class="waypoint-addr" placeholder="경유지 주소 입력">`;
-            container.appendChild(div);
-        }
+    function addWaypoint() {
+        const container = document.getElementById('waypoint-list');
+        const div = document.createElement('div');
+        div.className = 'route-row';
+        div.innerHTML = `<span class="label">경유</span><input type="text" class="wp-addr" placeholder="경유지 주소">`;
+        container.appendChild(div);
+    }
 
-        async function getOptimizedRoute() {
-            const restApiKey = '53a905aaf52c117f0fca4725228fa007';
-            const startAddr = document.getElementById('startAddr').value;
-            const endAddr = document.getElementById('endAddr').value;
-            const wpElements = document.getElementsByClassName('waypoint-addr');
+    async function findRoute() {
+        const startAddr = document.getElementById('startAddr').value;
+        const endAddr = document.getElementById('endAddr').value;
+        const wpInputs = document.getElementsByClassName('wp-addr');
 
-            try {
-                // 1. 주소를 좌표로 변환
-                const origin = await addressSearch(startAddr);
-                const destination = await addressSearch(endAddr);
-                
-                let waypoints = [];
-                for (let el of wpElements) {
-                    if (el.value.trim() !== "") {
-                        const coords = await addressSearch(el.value);
-                        waypoints.push({ name: el.value, x: coords.lng, y: coords.lat });
-                    }
-                }
-
-                // 2. 카카오 모빌리티 REST API 호출 (다중 경유지 최적화)
-                // waypoints 구조: "x,y|x,y" 형태
-                const wpQuery = waypoints.map(w => `${w.x},${w.y}`).join('|');
-                
-                // REST API URL 구성 (최적화 옵션 포함)
-                let url = `https://apis-navi.kakaomobility.com/v1/directions?origin=${origin.lng},${origin.lat}&destination=${destination.lng},${destination.lat}&priority=RECOMMEND&waypoint_priority=OPTIMIZE`;
-                if(wpQuery) url += `&waypoints=${wpQuery}`;
-
-                const response = await fetch(url, {
-                    headers: { 'Authorization': `KakaoAK ${restApiKey}` }
-                });
-
-                const data = await response.json();
-
-                if (data.routes && data.routes[0]) {
-                    const route = data.routes[0];
-                    displayResult(route);
-                    drawRouteOnMap(route);
-                } else {
-                    alert("경로를 찾을 수 없습니다.");
-                }
-
-            } catch (err) {
-                console.error(err);
-                alert("탐색 중 오류가 발생했습니다. 주소가 정확한지 확인하세요.");
+        try {
+            // 1. 모든 지점의 좌표 찾기
+            const start = await searchAddress(startAddr);
+            const end = await searchAddress(endAddr);
+            let waypoints = [];
+            for(let input of wpInputs) {
+                if(input.value.trim()) waypoints.push(await searchAddress(input.value));
             }
-        }
 
-        function addressSearch(address) {
-            return new Promise((resolve, reject) => {
-                geocoder.addressSearch(address, (result, status) => {
-                    if (status === kakao.maps.services.Status.OK) {
-                        resolve({ lat: result[0].y, lng: result[0].x });
-                    } else reject("Address not found");
-                });
-            });
-        }
+            // 2. 지도 마커 초기화 및 표시
+            clearMarkers();
+            drawMarker(start, "출발");
+            drawMarker(end, "도착");
+            waypoints.forEach((wp, idx) => drawMarker(wp, `경유${idx+1}`));
 
-        function displayResult(route) {
-            const resDiv = document.getElementById('result');
-            const dist = (route.summary.distance / 1000).toFixed(2);
-            const time = Math.floor(route.summary.duration / 60);
-            
-            resDiv.style.display = 'block';
-            resDiv.innerHTML = `
-                <strong>🚗 최적화 결과</strong><br>
-                - 총 거리: ${dist} km<br>
-                - 예상 소요 시간: 약 ${time}분<br>
-                <small>* 경유지 방문 순서가 최단 시간/거리 기준으로 자동 재배치되었습니다.</small>
-            `;
-        }
-
-        function drawRouteOnMap(route) {
-            // 초기화
-            if (polyline) polyline.setMap(null);
-            markers.forEach(m => m.setMap(null));
-            markers = [];
-
-            const linePath = [];
+            // 3. 지도 범위 조정
             const bounds = new kakao.maps.LatLngBounds();
-
-            // 섹션별(구간별) 경로 좌표 추출
-            route.sections.forEach(section => {
-                section.roads.forEach(road => {
-                    road.vertexes.forEach((v, i) => {
-                        if (i % 2 === 0) {
-                            const point = new kakao.maps.LatLng(road.vertexes[i+1], road.vertexes[i]);
-                            linePath.push(point);
-                            bounds.extend(point);
-                        }
-                    });
-                });
-            });
-
-            // 경로 그리기
-            polyline = new kakao.maps.Polyline({
-                path: linePath,
-                strokeWeight: 5,
-                strokeColor: '#FF33E9',
-                strokeOpacity: 0.8
-            });
-            polyline.setMap(map);
-
-            // 출발/도착 마커
-            const startNode = new kakao.maps.Marker({
-                position: new kakao.maps.LatLng(route.summary.origin.y, route.summary.origin.x),
-                map: map
-            });
-            markers.push(startNode);
-
-            const endNode = new kakao.maps.Marker({
-                position: new kakao.maps.LatLng(route.summary.destination.y, route.summary.destination.x),
-                map: map
-            });
-            markers.push(endNode);
-
+            bounds.extend(start);
+            bounds.extend(end);
+            waypoints.forEach(wp => bounds.extend(wp));
             map.setBounds(bounds);
+
+            // 4. 결과 알림 및 외부 길찾기 연동
+            const info = document.getElementById('info-box');
+            info.style.display = 'block';
+            info.innerHTML = `
+                <strong>📍 좌표 검색 완료</strong><br>
+                지도에 지점들이 표시되었습니다. 상세 경로 및 실시간 소요 시간은 카카오맵 앱 또는 웹으로 연결됩니다.<br><br>
+                <button onclick="openKakaoMap('${startAddr}', '${endAddr}')" style="background:#4a90e2; color:white; padding:5px 10px;">카카오맵에서 경로 확인</button>
+            `;
+
+        } catch (e) {
+            alert("주소를 정확히 입력해주세요: " + e);
         }
-    </script>
+    }
+
+    function searchAddress(addr) {
+        return new Promise((resolve, reject) => {
+            geocoder.addressSearch(addr, (result, status) => {
+                if (status === kakao.maps.services.Status.OK) {
+                    resolve(new kakao.maps.LatLng(result[0].y, result[0].x));
+                } else reject(addr);
+            });
+        });
+    }
+
+    function drawMarker(pos, title) {
+        const marker = new kakao.maps.Marker({ position: pos, map: map });
+        const infowindow = new kakao.maps.InfoWindow({ content: `<div style="padding:5px;font-size:12px;">${title}</div>` });
+        infowindow.open(map, marker);
+        markers.push(marker);
+    }
+
+    function clearMarkers() {
+        markers.forEach(m => m.setMap(null));
+        markers = [];
+    }
+
+    function openKakaoMap(sName, eName) {
+        // 카카오맵 길찾기 URL (웹/앱 연동)
+        const url = `https://map.kakao.com/?sName=${encodeURIComponent(sName)}&eName=${encodeURIComponent(eName)}`;
+        window.open(url, '_blank');
+    }
+</script>
 </body>
 </html>
