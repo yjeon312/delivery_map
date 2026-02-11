@@ -2,133 +2,111 @@
 <html lang="ko">
 <head>
     <meta charset="utf-8">
-    <title>카카오 지도 최적 경로</title>
+    <title>카카오 지도 경로 탐색</title>
     <style>
-        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background: #f0f2f5; }
-        .container { max-width: 700px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .input-group { margin-bottom: 10px; display: flex; align-items: center; }
-        .input-group label { width: 60px; font-weight: bold; }
+        body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background: #f4f4f4; }
+        .box { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .row { margin-bottom: 10px; display: flex; align-items: center; }
+        label { width: 50px; font-weight: bold; }
         input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
-        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .btn-search { background: #fee500; width: 100%; margin-top: 10px; font-size: 16px; }
-        .btn-add { background: #e9ecef; margin: 5px 0 15px 60px; font-size: 12px; }
-        #map { width: 100%; height: 450px; margin-top: 20px; border-radius: 10px; border: 1px solid #ddd; }
-        #result-info { margin-top: 15px; padding: 10px; background: #fffde7; border-left: 4px solid #fbc02d; display: none; }
+        button { width: 100%; padding: 12px; background: #fee500; border: none; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        #map { width: 100%; height: 400px; margin-top: 20px; border-radius: 10px; border: 1px solid #ddd; }
+        .info { margin-top: 15px; font-size: 14px; color: #333; line-height: 1.6; display: none; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h3>🚗 최적 경로 탐색 (SDK 버전)</h3>
+<div class="box">
+    <h3>🚗 최적 경로 탐색기</h3>
+    <div class="row"><label>출발</label><input type="text" id="startAddr" value="서울 서초구 잠원로 166-17"></div>
+    <div id="wp-container">
+        <div class="row"><label>경유</label><input type="text" class="wp-addr" value="대구 수성구 신천동로 320"></div>
+    </div>
+    <div class="row"><label>도착</label><input type="text" id="endAddr" value="서울 서초구 잠원로 166-17"></div>
     
-    <div class="input-group">
-        <label>출발</label>
-        <input type="text" id="startAddr" value="서울역" placeholder="출발지 주소">
-    </div>
-
-    <div id="waypoint-area">
-        <div class="input-group">
-            <label>경유</label>
-            <input type="text" class="wp-addr" placeholder="경유지 주소 (선택)">
-        </div>
-    </div>
-    <button class="btn-add" onclick="addWaypoint()">+ 경유지 추가</button>
-
-    <div class="input-group">
-        <label>도착</label>
-        <input type="text" id="endAddr" value="부산역" placeholder="도착지 주소">
-    </div>
-
-    <button class="btn-search" onclick="startNavigation()">경로 확인하기</button>
-
-    <div id="result-info"></div>
+    <button onclick="startSearch()">경로 탐색 및 길찾기 실행</button>
+    
+    <div id="info" class="info"></div>
     <div id="map"></div>
 </div>
 
 <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=cc6395efcb6491cc27cc6346dc2f5283&libraries=services"></script>
 
 <script>
-    var mapContainer = document.getElementById('map'),
-        mapOption = { center: new kakao.maps.LatLng(37.5668, 126.9786), level: 3 };
-    var map = new kakao.maps.Map(mapContainer, mapOption);
-    var geocoder = new kakao.maps.services.Geocoder();
-    var markers = [];
+    // 변수 초기화 오류 방지를 위해 전역 선언을 피하고 함수 내부에서 초기화
+    var map, geocoder, markers = [];
 
-    function addWaypoint() {
-        const div = document.createElement('div');
-        div.className = 'input-group';
-        div.innerHTML = '<label>경유</label><input type="text" class="wp-addr" placeholder="경유지 주소">';
-        document.getElementById('waypoint-area').appendChild(div);
-    }
+    // 페이지 로드 후 지도 초기화
+    window.onload = function() {
+        var container = document.getElementById('map');
+        var options = { center: new kakao.maps.LatLng(37.5668, 126.9786), level: 3 };
+        map = new kakao.maps.Map(container, options);
+        geocoder = new kakao.maps.services.Geocoder();
+    };
 
-    async function startNavigation() {
-        const sAddr = document.getElementById('startAddr').value;
-        const eAddr = document.getElementById('endAddr').value;
-        const wpNodes = document.querySelectorAll('.wp-addr');
+    function startSearch() {
+        var sAddr = document.getElementById('startAddr').value;
+        var eAddr = document.getElementById('endAddr').value;
+        var wpInputs = document.querySelectorAll('.wp-addr');
 
-        try {
-            // 1. 주소 -> 좌표 변환 (SDK 서비스 이용)
-            const sPos = await addrToCoords(sAddr);
-            const ePos = await addrToCoords(eAddr);
-            
-            clearMarkers();
-            addMarker(sPos, "출발");
-            addMarker(ePos, "도착");
+        // 기존 마커 제거
+        for (var i = 0; i < markers.length; i++) { markers[i].setMap(null); }
+        markers = [];
 
-            let wpCoords = [];
-            for (let node of wpNodes) {
-                if (node.value.trim()) {
-                    const pos = await addrToCoords(node.value);
-                    wpCoords.push(pos);
-                    addMarker(pos, "경유");
-                }
+        var bounds = new kakao.maps.LatLngBounds();
+
+        // 1. 출발지 검색
+        geocoder.addressSearch(sAddr, function(result, status) {
+            if (status === kakao.maps.services.Status.OK) {
+                var pos = new kakao.maps.LatLng(result[0].y, result[0].x);
+                addMarker(pos, "출발");
+                bounds.extend(pos);
+
+                // 2. 도착지 검색 (순차 실행)
+                geocoder.addressSearch(eAddr, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        var pos = new kakao.maps.LatLng(result[0].y, result[0].x);
+                        addMarker(pos, "도착");
+                        bounds.extend(pos);
+
+                        // 3. 경유지 검색 및 최종 처리
+                        var wpCount = 0;
+                        if(wpInputs.length === 0) finish();
+                        
+                        for(var j=0; j<wpInputs.length; j++) {
+                            (function(index) {
+                                geocoder.addressSearch(wpInputs[index].value, function(res, stat) {
+                                    if(stat === kakao.maps.services.Status.OK) {
+                                        var p = new kakao.maps.LatLng(res[0].y, res[0].x);
+                                        addMarker(p, "경유");
+                                        bounds.extend(p);
+                                    }
+                                    wpCount++;
+                                    if(wpCount === wpInputs.length) finish();
+                                });
+                            })(j);
+                        }
+                    }
+                });
+            } else {
+                alert("주소를 찾을 수 없습니다.");
             }
-
-            // 2. 지도 범위 조정
-            const bounds = new kakao.maps.LatLngBounds();
-            bounds.extend(sPos);
-            bounds.extend(ePos);
-            wpCoords.forEach(p => bounds.extend(p));
-            map.setBounds(bounds);
-
-            // 3. 결과 안내 (SDK 방식은 보안상 길찾기 화면으로 연결하는 것이 최선)
-            const resDiv = document.getElementById('result-info');
-            resDiv.style.display = 'block';
-            resDiv.innerHTML = `
-                <strong>📍 지점 등록 완료</strong><br>
-                입력하신 주소들이 지도에 표시되었습니다.<br>
-                <a href="https://map.kakao.com/?sName=${encodeURIComponent(sAddr)}&eName=${encodeURIComponent(eAddr)}" target="_blank" style="color:blue; text-decoration:underline;">
-                👉 여기를 클릭하여 실시간 최적 경로와 소요 시간 확인하기
-                </a>
-            `;
-
-        } catch (err) {
-            alert("주소를 찾을 수 없습니다: " + err);
-        }
-    }
-
-    function addrToCoords(addr) {
-        return new Promise((resolve, reject) => {
-            geocoder.addressSearch(addr, function(result, status) {
-                if (status === kakao.maps.services.Status.OK) {
-                    resolve(new kakao.maps.LatLng(result[0].y, result[0].x));
-                } else {
-                    reject(addr);
-                }
-            });
         });
+
+        function finish() {
+            map.setBounds(bounds);
+            var info = document.getElementById('info');
+            info.style.display = 'block';
+            info.innerHTML = "<strong>✅ 탐색 완료</strong><br>좌표 기반 길찾기는 아래 링크를 이용하세요.<br>" + 
+                             "<a href='https://map.kakao.com/?sName="+encodeURIComponent(sAddr)+"&eName="+encodeURIComponent(eAddr)+"' target='_blank'>[카카오맵 길찾기 바로가기]</a>";
+        }
     }
 
     function addMarker(pos, title) {
         var marker = new kakao.maps.Marker({ position: pos, map: map });
         markers.push(marker);
-        var iw = new kakao.maps.InfoWindow({ content: `<div style="padding:5px;font-size:12px;">${title}</div>` });
+        var iw = new kakao.maps.InfoWindow({ content: '<div style="padding:5px;font-size:12px;">'+title+'</div>' });
         iw.open(map, marker);
-    }
-
-    function clearMarkers() {
-        markers.forEach(m => m.setMap(null));
-        markers = [];
     }
 </script>
 </body>
